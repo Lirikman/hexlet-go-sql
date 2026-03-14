@@ -11,9 +11,10 @@ import (
 )
 
 type User struct {
-	ID    int64  `json:"id"`
-	Email string `json:"email"`
-	Name  string `json:"name"`
+	ID         int64  `json:"id"`
+	Email      string `json:"email"`
+	FisrttName string `json:"first_name"`
+	LastName   string `json:"last_name"`
 }
 
 func main() {
@@ -33,22 +34,26 @@ func main() {
 	const schema = `CREATE TABLE IF NOT EXISTS users(
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		email TEXT NOT NULL UNIQUE,
-		name TEXT
+		first_name TEXT,
+		last_name TEXT
 	);`
 	if _, err := db.ExecContext(ctx, schema); err != nil {
 		log.Fatalf("create table: %v", err)
 	}
 
-	const insert = `INSERT INTO users(email, name) VALUES(?, ?) ON CONFLICT(email) DO NOTHING;`
-	if _, err := db.ExecContext(ctx, insert, "ivan_iv@mail.ru", "Ivan Ivanov"); err != nil {
+	const insert = `INSERT INTO users(email, first_name, last_name) VALUES (?, ?, ?) ON CONFLICT(email) DO NOTHING;`
+	if _, err := db.ExecContext(ctx, insert, "ivan_iv@mail.ru", "Ivan", "Petrov"); err != nil {
+		log.Fatalf("insert user: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, insert, "max20@ya.ru", "Maksim", "Rozov"); err != nil {
 		log.Fatalf("insert user: %v", err)
 	}
 
 	var u User
 	err = db.QueryRowContext(ctx,
-		`SELECT id, email, name FROM users WHERE email = ?`,
+		`SELECT id, email, first_name, last_name FROM users WHERE email = ?`,
 		"ivan_iv@mail.ru",
-	).Scan(&u.ID, &u.Email, &u.Name)
+	).Scan(&u.ID, &u.Email, &u.FisrttName, &u.LastName)
 	if err != nil {
 		log.Fatalf("select user: %v", err)
 	}
