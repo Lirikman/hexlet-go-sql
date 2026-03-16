@@ -3,19 +3,15 @@ package main
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"fmt"
 	"log"
+	"os"
 	"time"
 
+	pkg "example.com/go-sql/internal/storage"
+	"github.com/urfave/cli/v3"
 	_ "modernc.org/sqlite"
 )
-
-type User struct {
-	ID         int64  `json:"id"`
-	Email      string `json:"email"`
-	FisrttName string `json:"first_name"`
-	LastName   string `json:"last_name"`
-}
 
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -31,33 +27,76 @@ func main() {
 		log.Fatalf("ping db: %v", err)
 	}
 
-	const schema = `CREATE TABLE IF NOT EXISTS users(
+	const schema = `CREATE TABLE IF NOT EXISTS courses(
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		email TEXT NOT NULL UNIQUE,
-		first_name TEXT,
-		last_name TEXT
+		slug TEXT NOT NULL UNIQUE,
+		title TEXT NOT NULL,
+		price INTEGER NOT NULL DEFAULT 0
 	);`
+
 	if _, err := db.ExecContext(ctx, schema); err != nil {
 		log.Fatalf("create table: %v", err)
 	}
 
-	const insert = `INSERT INTO users(email, first_name, last_name) VALUES (?, ?, ?) ON CONFLICT(email) DO NOTHING;`
-	if _, err := db.ExecContext(ctx, insert, "ivan_iv@mail.ru", "Ivan", "Petrov"); err != nil {
-		log.Fatalf("insert user: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, insert, "max20@ya.ru", "Maksim", "Rozov"); err != nil {
-		log.Fatalf("insert user: %v", err)
+	cmd := &cli.Command{
+		Name:  "Example of working with a database on GO",
+		Usage: "database SQLite; supports -a (adding a record), -l (list of courses), -f (course on id)",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:    "create_course",
+				Aliases: []string{"a"},
+				Value:   false,
+				Usage:   "adding a new course to the database",
+			},
+			&cli.BoolFlag{
+				Name:    "list_courses",
+				Aliases: []string{"l"},
+				Value:   false,
+				Usage:   "getting a list of all courses",
+			},
+			&cli.BoolFlag{
+				Name:    "course_on_id",
+				Aliases: []string{"f"},
+				Value:   false,
+				Usage:   "getting a course on id",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			// n := cmd.NArg()
+			// if n == 0 {
+			// 	return fmt.Errorf("no arguments entered, enter flag -h for help")
+			// }
+			if cmd.Bool("create_course") {
+				res, err := pkg.CreateCourse(ctx, db, pkg.Course{Slug: "Backend", Title: "PHP", Price: 60000})
+				if err != nil {
+					return fmt.Errorf("Error: %w", err)
+				}
+				fmt.Printf("operation was completed successfully - last id: %v", res)
+			}
+			if cmd.Bool("list_courses") {
+				res, err := pkg.ListCourses(ctx, db, 10, 0, "title ASC")
+				if err != nil {
+					return fmt.Errorf("error: %w", err)
+				}
+				fmt.Printf("List of all courses:\n")
+				for _, rec := range res {
+					fmt.Printf("%v. %v %v - %v RUB.\n", rec.ID, rec.Slug, rec.Title, rec.Price)
+				}
+			}
+			if cmd.Bool("course_on_id") {
+				res, err := pkg.FindCoursesByIDs(ctx, db, []int64{1, 2, 4})
+				if err != nil {
+					return fmt.Errorf("error: %w", err)
+				}
+				for _, rec := range res {
+					fmt.Printf("%v %v %v %v\n", rec.ID, rec.Slug, rec.Title, rec.Price)
+				}
+			}
+			return nil
+		},
 	}
 
-	var u User
-	err = db.QueryRowContext(ctx,
-		`SELECT id, email, first_name, last_name FROM users WHERE email = ?`,
-		"ivan_iv@mail.ru",
-	).Scan(&u.ID, &u.Email, &u.FisrttName, &u.LastName)
-	if err != nil {
-		log.Fatalf("select user: %v", err)
+	if err := cmd.Run(context.Background(), os.Args); err != nil {
+		log.Fatal(err)
 	}
-
-	payload, _ := json.MarshalIndent(u, "", "  ")
-	log.Printf("loaded user: %s", payload)
 }
