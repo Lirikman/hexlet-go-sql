@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -27,11 +28,12 @@ func main() {
 		log.Fatalf("ping db: %v", err)
 	}
 
-	const schema = `CREATE TABLE IF NOT EXISTS courses(
+	const schema = `CREATE TABLE IF NOT EXISTS users(
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		slug TEXT NOT NULL UNIQUE,
-		title TEXT NOT NULL,
-		price INTEGER NOT NULL DEFAULT 0
+		name VARCHAR(50),
+		email VARCHAR(50) UNIQUE,
+		age INTEGER,
+		created_at TIMESTAMP DEFAULT(datetime('now', 'localtime'))
 	);`
 
 	if _, err := db.ExecContext(ctx, schema); err != nil {
@@ -39,60 +41,130 @@ func main() {
 	}
 
 	cmd := &cli.Command{
+
 		Name:  "Example of working with a database on GO",
-		Usage: "database SQLite; supports -a (adding a record), -l (list of courses), -f (course on id)",
-		Flags: []cli.Flag{
-			&cli.BoolFlag{
-				Name:    "create_course",
-				Aliases: []string{"a"},
-				Value:   false,
-				Usage:   "adding a new course to the database",
+		Usage: "database SQLite; supports -a (adding user), -l (list of users), -f (get user on id)",
+		Commands: []*cli.Command{
+			{
+				Name:  "add",
+				Usage: "add a user to the database",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "name", Aliases: []string{"n"}},
+					&cli.StringFlag{Name: "email", Aliases: []string{"e"}},
+					&cli.Int64Flag{Name: "age", Aliases: []string{"a"}},
+				},
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					name := sql.NullString{String: cmd.String("name"), Valid: cmd.String("name") != ""}
+					email := sql.NullString{String: cmd.String("email"), Valid: cmd.String("email") != ""}
+					age := sql.NullInt64{Int64: cmd.Int64("age"), Valid: cmd.Int64("age") > 0}
+
+					dto := pkg.CreateUserDTO{
+						Name:  name,
+						Email: email,
+						Age:   age,
+					}
+
+					res, err := pkg.CreateUser(ctx, db, dto)
+					if err != nil {
+						return err
+					}
+
+					encoder := json.NewEncoder(os.Stdout)
+					encoder.SetIndent("", "  ")
+					fmt.Println(encoder.Encode(res))
+					return nil
+				},
 			},
-			&cli.BoolFlag{
-				Name:    "list_courses",
-				Aliases: []string{"l"},
-				Value:   false,
-				Usage:   "getting a list of all courses",
+			{
+				Name:  "update",
+				Usage: "updating user data",
+				Flags: []cli.Flag{
+					&cli.IntFlag{Name: "id"},
+					&cli.StringFlag{Name: "name", Aliases: []string{"n"}},
+					&cli.StringFlag{Name: "email", Aliases: []string{"e"}},
+					&cli.Int64Flag{Name: "age", Aliases: []string{"a"}},
+				},
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					id := cmd.Int("id")
+					name := sql.NullString{String: cmd.String("name"), Valid: cmd.String("name") != ""}
+					email := sql.NullString{String: cmd.String("email"), Valid: cmd.String("email") != ""}
+					age := sql.NullInt64{Int64: cmd.Int64("age"), Valid: cmd.Int64("age") > 0}
+
+					dto := pkg.UpdateUserDTO{
+						ID:    id,
+						Name:  name,
+						Email: email,
+						Age:   age,
+					}
+
+					res, err := pkg.UpdateUser(ctx, db, dto)
+					if err != nil {
+						return err
+					}
+
+					encoder := json.NewEncoder(os.Stdout)
+					encoder.SetIndent("", "  ")
+					fmt.Println(encoder.Encode(res))
+					return nil
+				},
 			},
-			&cli.BoolFlag{
-				Name:    "course_on_id",
-				Aliases: []string{"f"},
-				Value:   false,
-				Usage:   "getting a course on id",
+			{
+				Name:  "get",
+				Usage: "getting user by id",
+				Flags: []cli.Flag{
+					&cli.IntFlag{Name: "id"},
+				},
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					id := cmd.Int("id")
+					res, err := pkg.GetUser(ctx, db, id)
+
+					if err != nil {
+						return err
+					}
+
+					encoder := json.NewEncoder(os.Stdout)
+					encoder.SetIndent("", "  ")
+					fmt.Println(encoder.Encode(res))
+					return nil
+				},
 			},
-		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			// n := cmd.NArg()
-			// if n == 0 {
-			// 	return fmt.Errorf("no arguments entered, enter flag -h for help")
-			// }
-			if cmd.Bool("create_course") {
-				res, err := pkg.CreateCourse(ctx, db, pkg.Course{Slug: "Backend", Title: "PHP", Price: 60000})
-				if err != nil {
-					return fmt.Errorf("Error: %w", err)
-				}
-				fmt.Printf("operation was completed successfully - last id: %v", res)
-			}
-			if cmd.Bool("list_courses") {
-				res, err := pkg.ListCourses(ctx, db, 10, 0, "title ASC")
-				if err != nil {
-					return fmt.Errorf("error: %w", err)
-				}
-				fmt.Printf("List of all courses:\n")
-				for _, rec := range res {
-					fmt.Printf("%v. %v %v - %v RUB.\n", rec.ID, rec.Slug, rec.Title, rec.Price)
-				}
-			}
-			if cmd.Bool("course_on_id") {
-				res, err := pkg.FindCoursesByIDs(ctx, db, []int64{1, 2, 4})
-				if err != nil {
-					return fmt.Errorf("error: %w", err)
-				}
-				for _, rec := range res {
-					fmt.Printf("%v %v %v %v\n", rec.ID, rec.Slug, rec.Title, rec.Price)
-				}
-			}
-			return nil
+			{
+				Name:  "list",
+				Usage: "get a list of all users",
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					res, err := pkg.ListUsers(ctx, db)
+
+					if err != nil {
+						return err
+					}
+
+					encoder := json.NewEncoder(os.Stdout)
+					encoder.SetIndent("", "  ")
+					fmt.Println(encoder.Encode(res))
+					return nil
+				},
+			},
+			{
+				Name:  "delete",
+				Usage: "deleting a user by id",
+				Flags: []cli.Flag{
+					&cli.IntFlag{Name: "id"},
+				},
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					id := cmd.Int("id")
+
+					res, err := pkg.DeleteUser(ctx, db, id)
+
+					if err != nil {
+						return err
+					}
+
+					encoder := json.NewEncoder(os.Stdout)
+					encoder.SetIndent("", "  ")
+					fmt.Println(encoder.Encode(res))
+					return nil
+				},
+			},
 		},
 	}
 

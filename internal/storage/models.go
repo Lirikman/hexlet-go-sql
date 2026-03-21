@@ -4,93 +4,104 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
+	"time"
 )
 
-type Course struct {
-	ID    int
-	Slug  string
-	Title string
-	Price int
+type User struct {
+	ID        int64     `json:"id"`
+	Name      *string   `json:"name"`
+	Email     *string   `json:"email"`
+	Age       *int64    `json:"age"`
+	CreatedAt time.Time `json:"created at"`
 }
 
-func CreateCourse(ctx context.Context, db *sql.DB, c Course) (int64, error) {
+type CreateUserDTO struct {
+	ID        int
+	Name      sql.NullString
+	Email     sql.NullString
+	Age       sql.NullInt64
+	CreatedAt time.Time
+}
+
+type UpdateUserDTO struct {
+	ID        int
+	Name      sql.NullString
+	Email     sql.NullString
+	Age       sql.NullInt64
+	CreatedAt time.Time
+}
+
+func CreateUser(ctx context.Context, db *sql.DB, dto CreateUserDTO) (User, error) {
 	const query = `
-        INSERT INTO courses(slug, title, price)
+        INSERT INTO users(name, email, age)
         VALUES(?, ?, ?)
-        RETURNING id`
-
-	var id int64
-	if err := db.QueryRowContext(ctx, query, c.Slug, c.Title, c.Price).Scan(&id); err != nil {
-		return 0, fmt.Errorf("create course: %w", err)
+        RETURNING id, name, email, age, created_at
+		`
+	var out User
+	if err := db.QueryRowContext(ctx, query, dto.Name, dto.Email, dto.Age).Scan(&out.ID, &out.Name, &out.Email, &out.Age, &out.CreatedAt); err != nil {
+		return User{}, fmt.Errorf("create user: %w", err)
 	}
-	return id, nil
+	return out, nil
 }
 
-var allowedOrder = map[string]string{
-	"price_asc":  "price ASC",
-	"price_desc": "price DESC",
-	"title_asc":  "title ASC",
+func UpdateUser(ctx context.Context, db *sql.DB, dto UpdateUserDTO) (User, error) {
+	const query = `
+		UPDATE users SET name = COALESCE(?, name), age = COALESCE(?, age), email = COALESCE(?, email)
+		WHERE id = ?
+		RETURNING id, name, email, age, created_at
+		`
+	var out User
+	if err := db.QueryRowContext(ctx, query, dto.Name, dto.Age, dto.Email, dto.ID).Scan(&out.ID, &out.Name, &out.Email, &out.Age, &out.CreatedAt); err != nil {
+		return User{}, fmt.Errorf("update user: %w", err)
+	}
+	return out, nil
 }
 
-func ListCourses(ctx context.Context, db *sql.DB, limit, offset int, order string) ([]Course, error) {
-	ord, ok := allowedOrder[order]
-	if !ok {
-		ord = "id ASC"
+func GetUser(ctx context.Context, db *sql.DB, id int) (User, error) {
+	const query = `
+		SELECT id, name, email, age, created_at FROM users 
+		WHERE id = ?
+		`
+	var u User
+	if err := db.QueryRowContext(ctx, query, id).Scan(&u.ID, &u.Name, &u.Email, &u.Age, &u.CreatedAt); err != nil {
+		return User{}, fmt.Errorf("get user: %w", err)
 	}
+	return u, nil
+}
 
-	query := `
-        SELECT id, slug, title, price 
-        FROM courses
-        ORDER BY ` + ord + ` LIMIT ? OFFSET ?`
-
-	rows, err := db.QueryContext(ctx, query, limit, offset)
+func ListUsers(ctx context.Context, db *sql.DB) ([]User, error) {
+	const query = `
+		SELECT id, name, email, age, created_at FROM users
+		ORDER BY id
+		`
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("list courses: %w", err)
+		return nil, fmt.Errorf("list users: %w", err)
 	}
 	defer rows.Close()
-
-	var out []Course
-
+	var users []User
 	for rows.Next() {
-		var c Course
-		if err := rows.Scan(&c.ID, &c.Slug, &c.Title, &c.Price); err != nil {
-			return nil, fmt.Errorf("scan course: %w", err)
+		var u User
+		if err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.Age, &u.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan user: %w", err)
 		}
-		out = append(out, c)
+		users = append(users, u)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return users, nil
 }
 
-func FindCoursesByIDs(ctx context.Context, db *sql.DB, listIds []int64) ([]Course, error) {
-	if len(listIds) == 0 {
-		return []Course{}, nil
-	}
-
-	placeholders := strings.Repeat("?,", len(listIds))
-	placeholders = placeholders[:len(placeholders)-1]
-
-	args := make([]interface{}, len(listIds))
-	for i, v := range listIds {
-		args[i] = v
-	}
-
-	query := `SELECT id, slug, title, price FROM courses WHERE id IN (` + placeholders + `)`
-
-	rows, err := db.QueryContext(ctx, query, args...)
+func DeleteUser(ctx context.Context, db *sql.DB, id int) (string, error) {
+	const query = `
+		DELETE FROM users 
+		WHERE id = ?
+		`
+	_, err := db.ExecContext(ctx, query, id)
 	if err != nil {
-		return nil, fmt.Errorf("find courses: %w", err)
+		return "", fmt.Errorf("delete user: %w", err)
 	}
-	defer rows.Close()
-
-	var out []Course
-
-	for rows.Next() {
-		var c Course
-		if err := rows.Scan(&c.ID, &c.Slug, &c.Title, &c.Price); err != nil {
-			return nil, fmt.Errorf("scan course: %w", err)
-		}
-		out = append(out, c)
-	}
-	return out, rows.Err()
+	msg := fmt.Sprintf("user with the email - %d has been successfully deleted", id)
+	return msg, nil
 }
